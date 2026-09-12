@@ -7,6 +7,7 @@ import MonthNav from '../components/MonthNav'
 import GaugeRing from '../components/GaugeRing'
 import StatCard from '../components/StatCard'
 import BillRow from '../components/BillRow'
+import TrackedBillsCard from '../components/TrackedBillsCard'
 import { PlusIcon, TrendingUpIcon, ShieldIcon, WalletIcon, WarningIcon } from '../components/icons'
 import type { Season } from '../types/models'
 
@@ -41,8 +42,10 @@ export default function DashboardPage() {
   })
 
   const committedFraction = month.income_cents > 0 ? (summary.billsTotalCents + summary.flexSpentCents) / month.income_cents : 0
-  const confirmedCount = confirmedBillsCount(bills)
-  const paidCount = paidBillsCount(bills)
+  const trackedBills = bills.filter((b) => b.is_tracked)
+  const regularBills = bills.filter((b) => !b.is_tracked)
+  const confirmedCount = confirmedBillsCount(regularBills)
+  const paidCount = paidBillsCount(regularBills)
 
   async function handleSeasonToggle(season: Season) {
     if (readOnly) return
@@ -152,15 +155,17 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <TrackedBillsCard bills={trackedBills} readOnly={readOnly} />
+
       <div className="mt-6 px-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-base font-semibold text-ink dark:text-ink-dark">Bills</h2>
           <p className="text-xs font-medium text-muted dark:text-muted-dark">
-            {confirmedCount} of {bills.length} confirmed · {paidCount} of {bills.length} paid
+            {confirmedCount} of {regularBills.length} confirmed · {paidCount} of {regularBills.length} paid
           </p>
         </div>
         <div className="flex flex-col gap-2.5">
-          {bills.map((bill) => (
+          {regularBills.map((bill) => (
             <BillRow
               key={bill.id}
               bill={bill}

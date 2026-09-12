@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useAuth } from './AuthContext'
 import * as api from '../lib/api'
 import { addMonths, guessSeason } from '../lib/dates'
-import type { BillStatus, BillTemplate, FlexTag, FlexTagType, FlexTransaction, MonthlyBill, MonthlyBudget, Profile, Season } from '../types/models'
+import type { BillPurchase, BillStatus, BillTemplate, FlexTag, FlexTagType, FlexTransaction, MonthlyBill, MonthlyBudget, Profile, Season } from '../types/models'
 
 interface BudgetContextValue {
   loading: boolean
@@ -23,6 +23,7 @@ interface BudgetContextValue {
   budget: MonthlyBudget | null
   bills: MonthlyBill[]
   flexTransactions: FlexTransaction[]
+  billPurchases: BillPurchase[]
 
   refresh: () => Promise<void>
 
@@ -34,11 +35,14 @@ interface BudgetContextValue {
   addFlexTransaction: (input: { description: string; amountCents: number; category: string | null; personTag: string | null; date: string }) => Promise<void>
   deleteFlexTransaction: (id: string) => Promise<void>
 
+  addBillPurchase: (billId: string, input: { description: string | null; amountCents: number; date: string }) => Promise<void>
+  deleteBillPurchase: (id: string) => Promise<void>
+
   updateIncome: (incomeCents: number) => Promise<void>
   updateSeasonDefaults: (season: Season, patch: { gasCents?: number; flexTargetCents?: number; savingsTargetCents?: number }) => Promise<void>
 
   addBillTemplate: (input: { name: string; defaultAmountCents: number; type: 'fixed' | 'variable' }) => Promise<void>
-  updateBillTemplateFields: (id: string, patch: Partial<Pick<BillTemplate, 'name' | 'default_amount_cents' | 'type' | 'active'>>) => Promise<void>
+  updateBillTemplateFields: (id: string, patch: Partial<Pick<BillTemplate, 'name' | 'default_amount_cents' | 'type' | 'active' | 'is_tracked'>>) => Promise<void>
   deleteBillTemplateById: (id: string) => Promise<void>
   reorderBillTemplates: (orderedIds: string[]) => Promise<void>
 
@@ -69,6 +73,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
   const [budget, setBudget] = useState<MonthlyBudget | null>(null)
   const [bills, setBills] = useState<MonthlyBill[]>([])
   const [flexTransactions, setFlexTransactions] = useState<FlexTransaction[]>([])
+  const [billPurchases, setBillPurchases] = useState<BillPurchase[]>([])
 
   const loadStaticData = useCallback(async () => {
     if (!user) return
@@ -78,6 +83,36 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     setFlexTags(tags)
     return { profile: p, templates }
   }, [user])
+
+  /**
+   * Inserts a monthly_bills row for any active template that doesn't have
+   * one yet in this month. Without this, a bill added (or reactivated) in
+   * Settings after the current month's budget already exists would only
+   * ever show up starting the following month.
+   */
+  const syncMissingBillsForMonth = useCallback(
+    async (monthBudget: MonthlyBudget, templates: BillTemplate[], existingBills: MonthlyBill[]): Promise<MonthlyBill[]> => {
+      const existingTemplateIds = new Set(existingBills.map((b) => b.bill_template_id).filter(Boolean))
+      const missing = templates.filter((t) => t.active && !existingTemplateIds.has(t.id))
+      if (missing.length === 0) return existingBills
+
+      const gasCents = monthBudget.season === 'summer' ? profile?.summer_gas_cents : profile?.winter_gas_cents
+      const created = await api.createMonthlyBills(
+        missing.map((t) => ({
+          monthly_budget_id: monthBudget.id,
+          user_id: monthBudget.user_id,
+          bill_template_id: t.id,
+          name: t.name,
+          type: t.type,
+          expected_amount_cents: t.is_gas ? (gasCents ?? t.default_amount_cents) : t.default_amount_cents,
+          sort_order: t.sort_order,
+          is_tracked: t.is_tracked,
+        })),
+      )
+      return [...existingBills, ...created].sort((a, b) => a.sort_order - b.sort_order)
+    },
+    [profile],
+  )
 
   const loadMonth = useCallback(
     async (year: number, month: number, profileArg?: Profile, templatesArg?: BillTemplate[]) => {
@@ -116,21 +151,28 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
               type: t.type,
               expected_amount_cents: t.is_gas ? gasCents : t.default_amount_cents,
               sort_order: t.sort_order,
+              is_tracked: t.is_tracked,
             })),
           )
         }
       }
 
-      const [monthBills, monthFlex] = await Promise.all([
+      let [monthBills, monthFlex, monthPurchases] = await Promise.all([
         api.fetchMonthlyBills(monthBudget.id),
         api.fetchFlexTransactions(monthBudget.id),
+        api.fetchBillPurchases(monthBudget.id),
       ])
+
+      if (year === CURRENT_YEAR && month === CURRENT_MONTH) {
+        monthBills = await syncMissingBillsForMonth(monthBudget, activeTemplates, monthBills)
+      }
 
       setBudget(monthBudget)
       setBills(monthBills)
       setFlexTransactions(monthFlex)
+      setBillPurchases(monthPurchases)
     },
-    [user, profile, billTemplates],
+    [user, profile, billTemplates, syncMissingBillsForMonth],
   )
 
   useEffect(() => {
@@ -177,9 +219,14 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!budget) return
-    const [monthBills, monthFlex] = await Promise.all([api.fetchMonthlyBills(budget.id), api.fetchFlexTransactions(budget.id)])
+    const [monthBills, monthFlex, monthPurchases] = await Promise.all([
+      api.fetchMonthlyBills(budget.id),
+      api.fetchFlexTransactions(budget.id),
+      api.fetchBillPurchases(budget.id),
+    ])
     setBills(monthBills)
     setFlexTransactions(monthFlex)
+    setBillPurchases(monthPurchases)
   }, [budget])
 
   const goToPreviousMonth = useCallback(() => {
@@ -255,6 +302,49 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
   }, [])
 
+  const addBillPurchase = useCallback(
+    async (billId: string, input: { description: string | null; amountCents: number; date: string }) => {
+      if (!budget || !user) return
+      const bill = bills.find((b) => b.id === billId)
+      if (!bill) return
+
+      const created = await api.createBillPurchase({
+        monthly_bill_id: billId,
+        monthly_budget_id: budget.id,
+        user_id: user.id,
+        description: input.description,
+        amount_cents: input.amountCents,
+        purchase_date: input.date,
+      })
+      setBillPurchases((prev) => [created, ...prev])
+
+      const newTotal = (bill.actual_amount_cents ?? 0) + input.amountCents
+      const patch: Partial<MonthlyBill> = { actual_amount_cents: newTotal }
+      if (bill.status === 'pending') patch.status = 'confirmed'
+      const updatedBill = await api.updateMonthlyBill(billId, patch)
+      setBills((prev) => prev.map((b) => (b.id === updatedBill.id ? updatedBill : b)))
+    },
+    [budget, user, bills],
+  )
+
+  const deleteBillPurchaseFn = useCallback(
+    async (id: string) => {
+      const purchase = billPurchases.find((p) => p.id === id)
+      if (!purchase) return
+      const bill = bills.find((b) => b.id === purchase.monthly_bill_id)
+
+      await api.deleteBillPurchase(id)
+      setBillPurchases((prev) => prev.filter((p) => p.id !== id))
+
+      if (bill) {
+        const newTotal = Math.max(0, (bill.actual_amount_cents ?? 0) - purchase.amount_cents)
+        const updatedBill = await api.updateMonthlyBill(bill.id, { actual_amount_cents: newTotal })
+        setBills((prev) => prev.map((b) => (b.id === updatedBill.id ? updatedBill : b)))
+      }
+    },
+    [billPurchases, bills],
+  )
+
   const addFlexTransaction = useCallback(
     async (input: { description: string; amountCents: number; category: string | null; personTag: string | null; date: string }) => {
       if (!budget || !user) return
@@ -316,16 +406,24 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         sort_order: sortOrder,
       })
       setBillTemplates((prev) => [...prev, created])
+      if (budget && isViewingCurrentMonth) {
+        const synced = await syncMissingBillsForMonth(budget, [created], bills)
+        setBills(synced)
+      }
     },
-    [user, billTemplates],
+    [user, billTemplates, budget, isViewingCurrentMonth, bills, syncMissingBillsForMonth],
   )
 
   const updateBillTemplateFields = useCallback(
-    async (id: string, patch: Partial<Pick<BillTemplate, 'name' | 'default_amount_cents' | 'type' | 'active'>>) => {
+    async (id: string, patch: Partial<Pick<BillTemplate, 'name' | 'default_amount_cents' | 'type' | 'active' | 'is_tracked'>>) => {
       const updated = await api.updateBillTemplate(id, patch)
       setBillTemplates((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      if (patch.active === true && budget && isViewingCurrentMonth) {
+        const synced = await syncMissingBillsForMonth(budget, [updated], bills)
+        setBills(synced)
+      }
     },
-    [],
+    [budget, isViewingCurrentMonth, bills, syncMissingBillsForMonth],
   )
 
   const deleteBillTemplateById = useCallback(async (id: string) => {
@@ -396,12 +494,15 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       budget,
       bills,
       flexTransactions,
+      billPurchases,
       refresh,
       changeSeason,
       updateBillActual,
       markBillNoChange,
       markBillPaid,
       setBillStatus,
+      addBillPurchase,
+      deleteBillPurchase: deleteBillPurchaseFn,
       addFlexTransaction,
       deleteFlexTransaction: deleteFlexTransactionFn,
       updateIncome,
@@ -431,12 +532,15 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       budget,
       bills,
       flexTransactions,
+      billPurchases,
       refresh,
       changeSeason,
       updateBillActual,
       markBillNoChange,
       markBillPaid,
       setBillStatus,
+      addBillPurchase,
+      deleteBillPurchaseFn,
       addFlexTransaction,
       deleteFlexTransactionFn,
       updateIncome,

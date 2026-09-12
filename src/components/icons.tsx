@@ -148,6 +148,26 @@ export function ShieldIcon({ className }: IconProps) {
   )
 }
 
+export function CartIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.6h7.6a2 2 0 0 0 2-1.6L21 8H6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="9.5" cy="20.5" r="1.4" fill="currentColor" />
+      <circle cx="17" cy="20.5" r="1.4" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function BoxIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="m3 8 9-5 9 5-9 5-9-5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M3 8v8l9 5 9-5V8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 13v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function DragHandleIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>

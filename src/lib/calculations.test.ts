@@ -14,6 +14,7 @@ function bill(overrides: Partial<MonthlyBill>): MonthlyBill {
     actual_amount_cents: null,
     status: 'pending',
     sort_order: 0,
+    is_tracked: false,
     created_at: '2026-01-01',
     ...overrides,
   }

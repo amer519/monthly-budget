@@ -41,6 +41,12 @@ create table if not exists public.bill_templates (
 
 create index if not exists bill_templates_user_idx on public.bill_templates (user_id, sort_order);
 
+-- `is_tracked` marks a bill (Groceries, Household Items, ...) as one you build
+-- up over the month by quick-adding individual purchases (see bill_purchases
+-- below) rather than typing one lump "actual amount" — same idea as the Flex
+-- Fund, just scoped to a single bill line instead of the whole flex budget.
+alter table public.bill_templates add column if not exists is_tracked boolean not null default false;
+
 -- ----------------------------------------------------------------------------
 -- monthly_budgets: one row per calendar month
 -- ----------------------------------------------------------------------------
@@ -77,6 +83,29 @@ create table if not exists public.monthly_bills (
 );
 
 create index if not exists monthly_bills_budget_idx on public.monthly_bills (monthly_budget_id, sort_order);
+
+alter table public.monthly_bills add column if not exists is_tracked boolean not null default false;
+
+-- ----------------------------------------------------------------------------
+-- bill_purchases: individual purchases logged against a tracked bill
+-- (Groceries, Household Items, ...). Adding one bumps that bill's
+-- actual_amount_cents by amount_cents — the running total the rest of the
+-- app already reads via monthly_bills, so no calculation logic needs to
+-- know these exist.
+-- ----------------------------------------------------------------------------
+create table if not exists public.bill_purchases (
+  id uuid primary key default gen_random_uuid(),
+  monthly_bill_id uuid not null references public.monthly_bills (id) on delete cascade,
+  monthly_budget_id uuid not null references public.monthly_budgets (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  description text,
+  amount_cents bigint not null check (amount_cents >= 0),
+  purchase_date date not null default current_date,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists bill_purchases_bill_idx on public.bill_purchases (monthly_bill_id, purchase_date desc);
+create index if not exists bill_purchases_budget_idx on public.bill_purchases (monthly_budget_id);
 
 -- ----------------------------------------------------------------------------
 -- flex_transactions: individual Flex Fund purchases
@@ -134,6 +163,7 @@ alter table public.profiles enable row level security;
 alter table public.bill_templates enable row level security;
 alter table public.monthly_budgets enable row level security;
 alter table public.monthly_bills enable row level security;
+alter table public.bill_purchases enable row level security;
 alter table public.flex_transactions enable row level security;
 alter table public.flex_tags enable row level security;
 
@@ -173,6 +203,15 @@ create policy "monthly_bills_insert_own" on public.monthly_bills for insert with
 create policy "monthly_bills_update_own" on public.monthly_bills for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "monthly_bills_delete_own" on public.monthly_bills for delete using (auth.uid() = user_id);
 
+drop policy if exists "bill_purchases_select_own" on public.bill_purchases;
+drop policy if exists "bill_purchases_insert_own" on public.bill_purchases;
+drop policy if exists "bill_purchases_update_own" on public.bill_purchases;
+drop policy if exists "bill_purchases_delete_own" on public.bill_purchases;
+create policy "bill_purchases_select_own" on public.bill_purchases for select using (auth.uid() = user_id);
+create policy "bill_purchases_insert_own" on public.bill_purchases for insert with check (auth.uid() = user_id);
+create policy "bill_purchases_update_own" on public.bill_purchases for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "bill_purchases_delete_own" on public.bill_purchases for delete using (auth.uid() = user_id);
+
 drop policy if exists "flex_transactions_select_own" on public.flex_transactions;
 drop policy if exists "flex_transactions_insert_own" on public.flex_transactions;
 drop policy if exists "flex_transactions_update_own" on public.flex_transactions;
@@ -208,18 +247,19 @@ begin
   values (new.id)
   on conflict (user_id) do nothing;
 
-  insert into public.bill_templates (user_id, name, default_amount_cents, type, is_gas, sort_order)
+  insert into public.bill_templates (user_id, name, default_amount_cents, type, is_gas, is_tracked, sort_order)
   values
-    (new.id, 'Mortgage / Taxes / Homeowners / PMI', 194300, 'fixed', false, 1),
-    (new.id, 'Tesla', 64600, 'fixed', false, 2),
-    (new.id, 'Solar', 20000, 'fixed', false, 3),
-    (new.id, 'Car Insurance', 35300, 'fixed', false, 4),
-    (new.id, 'Comcast', 13000, 'fixed', false, 5),
-    (new.id, 'Water', 11000, 'variable', false, 6),
-    (new.id, 'Groceries', 73700, 'variable', false, 7),
-    (new.id, 'Electric', 40000, 'variable', false, 8),
-    (new.id, 'Gas', 1200, 'variable', true, 9),
-    (new.id, 'Streaming Services', 7000, 'variable', false, 10);
+    (new.id, 'Mortgage / Taxes / Homeowners / PMI', 194300, 'fixed', false, false, 1),
+    (new.id, 'Tesla', 64600, 'fixed', false, false, 2),
+    (new.id, 'Solar', 20000, 'fixed', false, false, 3),
+    (new.id, 'Car Insurance', 35300, 'fixed', false, false, 4),
+    (new.id, 'Comcast', 13000, 'fixed', false, false, 5),
+    (new.id, 'Water', 11000, 'variable', false, false, 6),
+    (new.id, 'Groceries', 73700, 'variable', false, true, 7),
+    (new.id, 'Electric', 40000, 'variable', false, false, 8),
+    (new.id, 'Gas', 1200, 'variable', true, false, 9),
+    (new.id, 'Streaming Services', 7000, 'variable', false, false, 10),
+    (new.id, 'Household Items', 0, 'variable', false, true, 11);
 
   insert into public.flex_tags (user_id, tag_type, label, sort_order)
   values
@@ -276,6 +316,34 @@ cross join (
 ) as v (tag_type, label, sort_order)
 where not exists (
   select 1 from public.flex_tags ft where ft.user_id = u.id and ft.tag_type = v.tag_type
+);
+
+-- ============================================================================
+-- Backfill: mark any existing "Groceries" or "*Household*" bill (template and
+-- already-created monthly bills) as tracked, so the Groceries & Household
+-- quick-add section on the dashboard picks up whatever you already have
+-- without duplicating or renaming anything you set up yourself.
+-- ============================================================================
+
+update public.bill_templates
+set is_tracked = true
+where (lower(name) = 'groceries' or lower(name) like '%household%')
+  and is_tracked = false;
+
+update public.monthly_bills
+set is_tracked = true
+where (lower(name) = 'groceries' or lower(name) like '%household%')
+  and is_tracked = false;
+
+-- If you don't already have a Household bill of your own, this adds a
+-- default "Household Items" template (tracked, $0 starting target — edit the
+-- target in Settings) so the section has something to show.
+insert into public.bill_templates (user_id, name, default_amount_cents, type, is_gas, is_tracked, sort_order)
+select u.id, 'Household Items', 0, 'variable', false, true,
+  coalesce((select max(sort_order) from public.bill_templates bt where bt.user_id = u.id), 0) + 1
+from auth.users u
+where not exists (
+  select 1 from public.bill_templates bt2 where bt2.user_id = u.id and lower(bt2.name) like '%household%'
 );
 
 -- ============================================================================

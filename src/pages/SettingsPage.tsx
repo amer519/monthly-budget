@@ -198,10 +198,11 @@ function BillTemplateRow({
   const [name, setName] = useState(template.name)
   const [amount, setAmount] = useState(String((template.default_amount_cents / 100).toFixed(2)))
   const [type, setType] = useState(template.type)
+  const [tracked, setTracked] = useState(template.is_tracked)
 
   async function handleSave() {
     const cents = template.is_gas ? template.default_amount_cents : (parseDollarInputToCents(amount) ?? template.default_amount_cents)
-    await budget.updateBillTemplateFields(template.id, { name: name.trim() || template.name, default_amount_cents: cents, type })
+    await budget.updateBillTemplateFields(template.id, { name: name.trim() || template.name, default_amount_cents: cents, type, is_tracked: tracked })
     setEditing(false)
   }
 
@@ -244,6 +245,18 @@ function BillTemplateRow({
             </button>
           ))}
         </div>
+        <button
+          onClick={() => setTracked((v) => !v)}
+          className="flex items-center justify-between rounded-xl bg-surface px-3 py-2.5 dark:bg-surface-dark"
+        >
+          <span className="text-left text-sm">
+            <span className="block font-medium text-ink dark:text-ink-dark">Quick-add tracking</span>
+            <span className="block text-xs text-muted dark:text-muted-dark">Build the total from logged purchases, like Groceries.</span>
+          </span>
+          <span className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition ${tracked ? 'bg-flex' : 'bg-black/10 dark:bg-white/15'}`}>
+            <span className={`block h-5 w-5 rounded-full bg-white transition ${tracked ? 'translate-x-5' : 'translate-x-0'}`} />
+          </span>
+        </button>
         <div className="flex gap-2">
           <button onClick={() => setEditing(false)} className="flex-1 rounded-xl bg-black/5 py-2.5 text-sm font-medium text-ink dark:bg-white/10 dark:text-ink-dark">
             Cancel
@@ -270,6 +283,9 @@ function BillTemplateRow({
       <button onClick={() => setEditing(true)} className="min-w-0 flex-1 text-left">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <p className="font-medium leading-snug text-ink dark:text-ink-dark">{template.name}</p>
+          {template.is_tracked && (
+            <span className="rounded-full bg-flex/15 px-2 py-0.5 text-[10px] font-medium text-flex">Tracked</span>
+          )}
           {!template.active && (
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-medium text-muted dark:bg-white/10 dark:text-muted-dark">
               Inactive

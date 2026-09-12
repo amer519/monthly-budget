@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient'
-import type { BillTemplate, FlexTag, FlexTagType, FlexTransaction, MonthlyBill, MonthlyBudget, Profile, Season } from '../types/models'
+import type { BillPurchase, BillTemplate, FlexTag, FlexTagType, FlexTransaction, MonthlyBill, MonthlyBudget, Profile, Season } from '../types/models'
 
 // ---------------------------------------------------------------------------
 // profiles
@@ -139,6 +139,7 @@ export async function createMonthlyBills(
     type: 'fixed' | 'variable'
     expected_amount_cents: number
     sort_order: number
+    is_tracked?: boolean
   }>,
 ): Promise<MonthlyBill[]> {
   const { data, error } = await supabase.from('monthly_bills').insert(rows).select()
@@ -150,6 +151,39 @@ export async function updateMonthlyBill(id: string, patch: Partial<MonthlyBill>)
   const { data, error } = await supabase.from('monthly_bills').update(patch).eq('id', id).select().single()
   if (error) throw error
   return data as MonthlyBill
+}
+
+// ---------------------------------------------------------------------------
+// bill_purchases — quick-add line items for tracked bills (Groceries, Household Items)
+// ---------------------------------------------------------------------------
+
+export async function fetchBillPurchases(monthlyBudgetId: string): Promise<BillPurchase[]> {
+  const { data, error } = await supabase
+    .from('bill_purchases')
+    .select('*')
+    .eq('monthly_budget_id', monthlyBudgetId)
+    .order('purchase_date', { ascending: false })
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data as BillPurchase[]
+}
+
+export async function createBillPurchase(input: {
+  monthly_bill_id: string
+  monthly_budget_id: string
+  user_id: string
+  description: string | null
+  amount_cents: number
+  purchase_date: string
+}): Promise<BillPurchase> {
+  const { data, error } = await supabase.from('bill_purchases').insert(input).select().single()
+  if (error) throw error
+  return data as BillPurchase
+}
+
+export async function deleteBillPurchase(id: string): Promise<void> {
+  const { error } = await supabase.from('bill_purchases').delete().eq('id', id)
+  if (error) throw error
 }
 
 // ---------------------------------------------------------------------------

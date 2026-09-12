@@ -27,6 +27,8 @@ export interface BillTemplate {
   active: boolean
   sort_order: number
   is_gas: boolean
+  /** Tracked bills (Groceries, Household Items, ...) build up their actual amount from quick-added purchases instead of one lump entry. */
+  is_tracked: boolean
   created_at: string
 }
 
@@ -53,6 +55,18 @@ export interface MonthlyBill {
   actual_amount_cents: number | null
   status: BillStatus
   sort_order: number
+  is_tracked: boolean
+  created_at: string
+}
+
+export interface BillPurchase {
+  id: string
+  monthly_bill_id: string
+  monthly_budget_id: string
+  user_id: string
+  description: string | null
+  amount_cents: number
+  purchase_date: string // ISO date
   created_at: string
 }
 
