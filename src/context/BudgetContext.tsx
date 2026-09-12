@@ -391,8 +391,29 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         dbPatch[season === 'summer' ? 'summer_savings_target_cents' : 'winter_savings_target_cents'] = patch.savingsTargetCents
       const updated = await api.updateProfile(user.id, dbPatch)
       setProfile(updated)
+
+      // Without this, a target change only takes effect starting next month —
+      // the same "settings edit doesn't reach the month you're already in"
+      // gap fixed for bill templates below.
+      if (budget && isViewingCurrentMonth && budget.season === season) {
+        const budgetPatch: Partial<MonthlyBudget> = {}
+        if (patch.flexTargetCents !== undefined) budgetPatch.flex_target_cents = patch.flexTargetCents
+        if (patch.savingsTargetCents !== undefined) budgetPatch.savings_target_cents = patch.savingsTargetCents
+        if (Object.keys(budgetPatch).length > 0) {
+          const updatedBudget = await api.updateMonthlyBudget(budget.id, budgetPatch)
+          setBudget(updatedBudget)
+        }
+
+        if (patch.gasCents !== undefined) {
+          const gasBill = bills.find((b) => b.name.toLowerCase() === 'gas')
+          if (gasBill && gasBill.status === 'pending') {
+            const updatedBill = await api.updateMonthlyBill(gasBill.id, { expected_amount_cents: patch.gasCents })
+            setBills((prev) => prev.map((b) => (b.id === updatedBill.id ? updatedBill : b)))
+          }
+        }
+      }
     },
-    [user],
+    [user, budget, isViewingCurrentMonth, bills],
   )
 
   const addBillTemplate = useCallback(
@@ -418,9 +439,23 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     async (id: string, patch: Partial<Pick<BillTemplate, 'name' | 'default_amount_cents' | 'type' | 'active' | 'is_tracked'>>) => {
       const updated = await api.updateBillTemplate(id, patch)
       setBillTemplates((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+
       if (patch.active === true && budget && isViewingCurrentMonth) {
         const synced = await syncMissingBillsForMonth(budget, [updated], bills)
         setBills(synced)
+        return
+      }
+
+      // A budget target you just changed should apply to the month you're
+      // in, not silently wait until next month — but only for bills that
+      // aren't a locked-in confirmed/paid amount already (tracked bills'
+      // expected amount is just a target, so it's always safe to update).
+      if (patch.default_amount_cents !== undefined && budget && isViewingCurrentMonth && !updated.is_gas) {
+        const currentBill = bills.find((b) => b.bill_template_id === id)
+        if (currentBill && (currentBill.is_tracked || currentBill.status === 'pending')) {
+          const updatedBill = await api.updateMonthlyBill(currentBill.id, { expected_amount_cents: patch.default_amount_cents })
+          setBills((prev) => prev.map((b) => (b.id === updatedBill.id ? updatedBill : b)))
+        }
       }
     },
     [budget, isViewingCurrentMonth, bills, syncMissingBillsForMonth],
