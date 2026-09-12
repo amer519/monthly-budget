@@ -8,6 +8,7 @@ import GaugeRing from '../components/GaugeRing'
 import StatCard from '../components/StatCard'
 import BillRow from '../components/BillRow'
 import TrackedBillsCard from '../components/TrackedBillsCard'
+import BudgetPlanCard from '../components/BudgetPlanCard'
 import { PlusIcon, TrendingUpIcon, ShieldIcon, WalletIcon, WarningIcon } from '../components/icons'
 import type { Season } from '../types/models'
 
@@ -154,6 +155,13 @@ export default function DashboardPage() {
           <Row label="Projected buffer" value={formatCents(summary.bufferCents)} emphasis={summary.bufferCents < 0 ? 'text-danger' : 'text-buffer'} />
         </div>
       </div>
+
+      <BudgetPlanCard
+        bills={bills}
+        incomeCents={month.income_cents}
+        flexTargetCents={month.flex_target_cents}
+        savingsTargetCents={month.savings_target_cents}
+      />
 
       <TrackedBillsCard bills={trackedBills} readOnly={readOnly} />
 
