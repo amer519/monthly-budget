@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { HomeIcon, WalletIcon, HistoryIcon, SettingsIcon } from './icons'
+import { HomeIcon, WalletIcon, CartIcon, HistoryIcon, SettingsIcon } from './icons'
 
 const items = [
   { to: '/', label: 'Home', icon: HomeIcon, end: true },
   { to: '/flex', label: 'Flex', icon: WalletIcon, end: false },
+  { to: '/household', label: 'Household', icon: CartIcon, end: false },
   { to: '/history', label: 'History', icon: HistoryIcon, end: false },
   { to: '/settings', label: 'Settings', icon: SettingsIcon, end: false },
 ]

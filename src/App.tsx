@@ -5,6 +5,7 @@ import { BudgetProvider } from './context/BudgetContext'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import FlexPage from './pages/FlexPage'
+import HouseholdPage from './pages/HouseholdPage'
 import HistoryPage from './pages/HistoryPage'
 import MonthDetailPage from './pages/MonthDetailPage'
 import SettingsPage from './pages/SettingsPage'
@@ -33,6 +34,7 @@ function AuthedApp() {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/flex" element={<FlexPage />} />
+          <Route path="/household" element={<HouseholdPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:year/:month" element={<MonthDetailPage />} />
           <Route path="/settings" element={<SettingsPage />} />
