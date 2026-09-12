@@ -91,60 +91,10 @@ export function computeMonthSummary(params: {
   }
 }
 
-export function billsPlannedTotalCents(bills: MonthlyBill[]): number {
-  return bills.reduce((sum, b) => sum + b.expected_amount_cents, 0)
-}
-
-export interface PlannedSummary {
-  incomeCents: number
-  billsPlannedTotalCents: number
-  flexTargetCents: number
-  /** income - plannedBills - flexTarget; can be negative if the plan itself doesn't fit the income */
-  plannedAvailableCents: number
-  /** portion of plannedAvailableCents allocated toward the savings goal, capped at the target and never negative */
-  plannedSavingsCents: number
-  savingsTargetCents: number
-  /** whatever the plan leaves over after bills, flex, and savings — can be negative if the plan doesn't fit */
-  plannedBufferCents: number
-  isPlanOverBudget: boolean
-}
-
-/**
- * The season's target allocation — "exactly how much should go to X" —
- * built entirely from expected bill amounts and targets, independent of
- * what's actually happened so far this month. Complements computeMonthSummary,
- * which tracks the live/actual picture instead.
- */
-export function computePlannedSummary(params: {
-  incomeCents: number
-  bills: MonthlyBill[]
-  flexTargetCents: number
-  savingsTargetCents: number
-}): PlannedSummary {
-  const { incomeCents, bills, flexTargetCents, savingsTargetCents } = params
-
-  const bPlanned = billsPlannedTotalCents(bills)
-  const available = incomeCents - bPlanned - flexTargetCents
-
-  const plannedSavings = Math.min(savingsTargetCents, Math.max(available, 0))
-  const plannedBuffer = available - plannedSavings
-
-  return {
-    incomeCents,
-    billsPlannedTotalCents: bPlanned,
-    flexTargetCents,
-    plannedAvailableCents: available,
-    plannedSavingsCents: plannedSavings,
-    savingsTargetCents,
-    plannedBufferCents: plannedBuffer,
-    isPlanOverBudget: available < 0,
-  }
-}
-
-/** 0-1 fraction of the flex fund used, clamped for progress bars/gauges. */
-export function flexUsedFraction(flexTargetCents: number, spentCents: number): number {
-  if (flexTargetCents <= 0) return spentCents > 0 ? 1 : 0
-  return Math.min(Math.max(spentCents / flexTargetCents, 0), 1)
+/** 0-1 fraction of a fund's budget used, clamped for progress bars/gauges. Works for Flex, Groceries, Household, or any budgeted amount vs. spent. */
+export function budgetUsedFraction(budgetCents: number, spentCents: number): number {
+  if (budgetCents <= 0) return spentCents > 0 ? 1 : 0
+  return Math.min(Math.max(spentCents / budgetCents, 0), 1)
 }
 
 export function savingsGoalFraction(savingsTargetCents: number, savingsPotentialCents: number): number {

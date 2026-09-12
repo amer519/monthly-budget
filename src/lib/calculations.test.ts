@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeMonthSummary, computePlannedSummary, effectiveBillAmountCents, flexRemainingCents } from './calculations'
+import { computeMonthSummary, effectiveBillAmountCents, flexRemainingCents } from './calculations'
 import type { FlexTransaction, MonthlyBill } from '../types/models'
 
 function bill(overrides: Partial<MonthlyBill>): MonthlyBill {
@@ -131,58 +131,40 @@ describe('computeMonthSummary — over budget never hides negative numbers', () 
   })
 })
 
-describe('computePlannedSummary — summer defaults reconcile exactly', () => {
-  const plannedBills: MonthlyBill[] = [
-    bill({ id: '1', name: 'Mortgage', expected_amount_cents: 194300 }),
-    bill({ id: '2', name: 'Tesla', expected_amount_cents: 64600 }),
-    bill({ id: '3', name: 'Solar', expected_amount_cents: 20000 }),
-    bill({ id: '4', name: 'Car Insurance', expected_amount_cents: 35300 }),
-    bill({ id: '5', name: 'Comcast', expected_amount_cents: 13000 }),
-    bill({ id: '6', name: 'Water', expected_amount_cents: 11000 }),
-    bill({ id: '7', name: 'Groceries', expected_amount_cents: 73700, is_tracked: true }),
-    bill({ id: '8', name: 'Electric', expected_amount_cents: 40000 }),
-    bill({ id: '9', name: 'Gas', expected_amount_cents: 1200 }),
-    bill({ id: '10', name: 'Streaming', expected_amount_cents: 7000 }),
-  ]
-  // matches the documented $4601.00 core bill total regardless of any actual/confirmed amounts
-  const plan = computePlannedSummary({ incomeCents: 586462, bills: plannedBills, flexTargetCents: 55000, savingsTargetCents: 60000 })
+describe('computeMonthSummary — buffer absorbs overspend before savings does', () => {
+  // Single bill standing in for the full $4601 core-bills total (including
+  // Groceries), so bumping its actual amount simulates an overspend without
+  // double-counting Groceries as a separate line.
+  // Baseline: available = 586462 - 460100 - 55000 = 71362 -> savings hits full
+  // target (60000), buffer is the last 11362.
+  function billsTotaling(actualCents: number): MonthlyBill[] {
+    return [bill({ expected_amount_cents: 460100, status: 'confirmed', actual_amount_cents: actualCents })]
+  }
 
-  it('bills planned total matches expected $4601.00', () => {
-    expect(plan.billsPlannedTotalCents).toBe(460100)
+  it('a small overspend (still above the savings target) only eats into buffer, savings stays at goal', () => {
+    const bills = billsTotaling(460100 + 5000) // $50 over
+    const summary = computeMonthSummary({ incomeCents: 586462, bills, flexTargetCents: 55000, flexTransactions: [flex(55000)], savingsTargetCents: 60000 })
+
+    expect(summary.savingsPotentialCents).toBe(60000) // untouched
+    expect(summary.bufferCents).toBe(11362 - 5000) // absorbs the whole overspend
   })
 
-  it('planned savings hits the full target', () => {
-    expect(plan.plannedSavingsCents).toBe(60000)
+  it('once buffer would go negative, savings itself starts shrinking instead', () => {
+    const bills = billsTotaling(460100 + 20000) // $200 over — more than the $113.62 buffer can absorb
+    const summary = computeMonthSummary({ incomeCents: 586462, bills, flexTargetCents: 55000, flexTransactions: [flex(55000)], savingsTargetCents: 60000 })
+
+    expect(summary.bufferCents).toBe(0) // buffer floors at 0, never negative while savings can still absorb more
+    expect(summary.savingsPotentialCents).toBeLessThan(60000) // savings took the excess instead
+    expect(summary.savingsPotentialCents).toBe(71362 - 20000)
   })
 
-  it('planned buffer matches the documented ~$113.62', () => {
-    expect(plan.plannedBufferCents).toBe(11362)
-  })
+  it('once savings is fully exhausted too, buffer finally goes negative and isOverBudget flips on', () => {
+    const bills = billsTotaling(460100 + 100000) // $1000 over — blows through the entire $600 savings goal too
+    const summary = computeMonthSummary({ incomeCents: 586462, bills, flexTargetCents: 55000, flexTransactions: [flex(55000)], savingsTargetCents: 60000 })
 
-  it('reconciles exactly: income = plannedBills + flexTarget + plannedSavings + plannedBuffer', () => {
-    const reconciled = plan.billsPlannedTotalCents + plan.flexTargetCents + plan.plannedSavingsCents + plan.plannedBufferCents
-    expect(reconciled).toBe(plan.incomeCents)
-  })
-
-  it('is not flagged over budget', () => {
-    expect(plan.isPlanOverBudget).toBe(false)
-  })
-
-  it('ignores actual/confirmed amounts entirely', () => {
-    const withActuals = plannedBills.map((b) => ({ ...b, status: 'confirmed' as const, actual_amount_cents: b.expected_amount_cents + 100000 }))
-    const planWithActuals = computePlannedSummary({ incomeCents: 586462, bills: withActuals, flexTargetCents: 55000, savingsTargetCents: 60000 })
-    expect(planWithActuals.billsPlannedTotalCents).toBe(plan.billsPlannedTotalCents)
-  })
-})
-
-describe('computePlannedSummary — plan that does not fit the income', () => {
-  it('flags over budget and shows a negative buffer instead of hiding it', () => {
-    const bills: MonthlyBill[] = [bill({ expected_amount_cents: 600000 })]
-    const plan = computePlannedSummary({ incomeCents: 586462, bills, flexTargetCents: 55000, savingsTargetCents: 60000 })
-
-    expect(plan.isPlanOverBudget).toBe(true)
-    expect(plan.plannedSavingsCents).toBe(0)
-    expect(plan.plannedBufferCents).toBeLessThan(0)
+    expect(summary.savingsPotentialCents).toBe(0)
+    expect(summary.bufferCents).toBeLessThan(0)
+    expect(summary.isOverBudget).toBe(true)
   })
 })
 

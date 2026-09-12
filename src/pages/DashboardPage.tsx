@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBudget } from '../context/BudgetContext'
-import { computeMonthSummary, confirmedBillsCount, flexUsedFraction, paidBillsCount } from '../lib/calculations'
+import { computeMonthSummary, confirmedBillsCount, paidBillsCount } from '../lib/calculations'
 import { formatCents } from '../lib/money'
 import MonthNav from '../components/MonthNav'
 import GaugeRing from '../components/GaugeRing'
-import StatCard from '../components/StatCard'
 import BillRow from '../components/BillRow'
-import TrackedBillsCard from '../components/TrackedBillsCard'
-import BudgetPlanCard from '../components/BudgetPlanCard'
-import { PlusIcon, TrendingUpIcon, ShieldIcon, WalletIcon, WarningIcon } from '../components/icons'
+import SpendingFundsCard, { type FundItem } from '../components/SpendingFundsCard'
+import MonthHealthCard from '../components/MonthHealthCard'
+import { PlusIcon, WalletIcon, BoxIcon, CartIcon, WarningIcon } from '../components/icons'
 import type { Season } from '../types/models'
 
 export default function DashboardPage() {
@@ -47,6 +46,18 @@ export default function DashboardPage() {
   const regularBills = bills.filter((b) => !b.is_tracked)
   const confirmedCount = confirmedBillsCount(regularBills)
   const paidCount = paidBillsCount(regularBills)
+
+  const spendingFunds: FundItem[] = [
+    { id: 'flex', name: 'Flex Fund', spentCents: summary.flexSpentCents, budgetCents: summary.flexTargetCents, linkTo: '/flex', icon: WalletIcon },
+    ...trackedBills.map((bill) => ({
+      id: bill.id,
+      name: bill.name,
+      spentCents: bill.actual_amount_cents ?? 0,
+      budgetCents: bill.expected_amount_cents,
+      linkTo: '/household',
+      icon: bill.name.toLowerCase().includes('grocer') ? CartIcon : BoxIcon,
+    })),
+  ]
 
   async function handleSeasonToggle(season: Season) {
     if (readOnly) return
@@ -112,36 +123,9 @@ export default function DashboardPage() {
         </GaugeRing>
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-3 px-5">
-        <StatCard
-          label="Flex Fund"
-          value={formatCents(summary.flexRemainingCents)}
-          sublabel={`${formatCents(summary.flexSpentCents, { noCents: true })} / ${formatCents(summary.flexTargetCents, { noCents: true })} spent`}
-          barClassName="bg-flex"
-          iconWrapperClassName="bg-flex/15 text-flex"
-          icon={<WalletIcon className="h-4 w-4" />}
-          progress={flexUsedFraction(summary.flexTargetCents, summary.flexSpentCents)}
-        />
-        <StatCard
-          label="Savings Potential"
-          value={formatCents(summary.savingsPotentialCents)}
-          sublabel={`goal ${formatCents(summary.savingsTargetCents, { noCents: true })}`}
-          barClassName="bg-savings"
-          iconWrapperClassName="bg-savings/15 text-savings"
-          icon={<TrendingUpIcon className="h-4 w-4" />}
-          progress={summary.savingsTargetCents > 0 ? summary.savingsPotentialCents / summary.savingsTargetCents : 0}
-        />
-        <div className="col-span-2">
-          <StatCard
-            label="Buffer"
-            value={formatCents(summary.bufferCents)}
-            sublabel="unallocated breathing room"
-            barClassName="bg-buffer"
-            iconWrapperClassName="bg-buffer/15 text-buffer"
-            icon={<ShieldIcon className="h-4 w-4" />}
-          />
-        </div>
-      </div>
+      <SpendingFundsCard funds={spendingFunds} />
+
+      <MonthHealthCard summary={summary} />
 
       <div className="mt-6 px-5">
         <h2 className="mb-3 text-base font-semibold text-ink dark:text-ink-dark">This Month</h2>
@@ -155,15 +139,6 @@ export default function DashboardPage() {
           <Row label="Projected buffer" value={formatCents(summary.bufferCents)} emphasis={summary.bufferCents < 0 ? 'text-danger' : 'text-buffer'} />
         </div>
       </div>
-
-      <BudgetPlanCard
-        bills={bills}
-        incomeCents={month.income_cents}
-        flexTargetCents={month.flex_target_cents}
-        savingsTargetCents={month.savings_target_cents}
-      />
-
-      <TrackedBillsCard bills={trackedBills} readOnly={readOnly} />
 
       <div className="mt-6 px-5">
         <div className="mb-3 flex items-center justify-between">

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useBudget } from '../context/BudgetContext'
-import { flexSpentCents, flexUsedFraction } from '../lib/calculations'
+import { flexSpentCents, budgetUsedFraction } from '../lib/calculations'
 import { formatCents, parseDollarInputToCents } from '../lib/money'
 import { formatDateReadable, todayIsoDate } from '../lib/dates'
 import MonthNav from '../components/MonthNav'
@@ -52,7 +52,7 @@ export default function FlexPage() {
           <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/25">
             <div
               className="h-full rounded-full bg-white"
-              style={{ width: `${flexUsedFraction(month.flex_target_cents, spent) * 100}%`, transition: 'width 0.6s ease-out' }}
+              style={{ width: `${budgetUsedFraction(month.flex_target_cents, spent) * 100}%`, transition: 'width 0.6s ease-out' }}
             />
           </div>
           <div className="mt-3 flex justify-between text-sm text-white/90">
